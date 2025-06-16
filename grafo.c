@@ -127,6 +127,8 @@ int busca_largura(grafo *g, vertice *r) {
     int fim_fila = 0;
     vertice **fila = malloc(sizeof(void*)*(size_t)g->n_vertices);
 
+
+    r->distancia = 0;
     fila[0] = r;
     tam_fila++;
 
@@ -235,25 +237,30 @@ int init_busca_profundidade(grafo *g) {
 
     return 1;
 }
+int compara_vertice_distancia(const void *a, const void *b) {
+    const vertice * const *va = (const vertice *const *)a;
+    const vertice * const *vb = (const vertice *const *)b;
+    return (*va)->distancia - (*vb)->distancia;
+}
 
 int dijkstra(grafo *g, vertice *r) {
 
     int tam_fila = 0;
-    int com_fila = 0;
-    int fim_fila = 0;
     vertice **fila = malloc(sizeof(void*)*(size_t)g->n_vertices);
 
     fila[0] = r;
     tam_fila++;
 
     r->estado = 1;
-    while(tam_fila) {
+    while(tam_fila > 0) {
 
-        vertice *v = fila[com_fila];
+        // Muito ineficiente, nao deu tempo de fazer uma heap
+        qsort(fila, (size_t)tam_fila, sizeof(vertice*), compara_vertice_distancia);
+
+        vertice *v = fila[0];
+        for(int i = 0; i < tam_fila-1; ++i)
+            fila[i] = fila[i+1];
         tam_fila--;
-        com_fila++;
-        if(com_fila + tam_fila < fim_fila)
-            fim_fila++;
 
         for(int i = 0; i < v->n_fronteira; ++i) {
 
@@ -269,10 +276,9 @@ int dijkstra(grafo *g, vertice *r) {
             }
             else if(w->estado == 0) {
                 w->pai = v;
-                w->distancia = v->distancia+e->peso;
+                w->distancia = v->distancia + e->peso;
 
-                fim_fila++;
-                fila[fim_fila] = w;
+                fila[tam_fila] = w;
                 tam_fila++;
 
                 w->estado = 1;
@@ -282,16 +288,16 @@ int dijkstra(grafo *g, vertice *r) {
     }
 
     int maior_distancia = INT_MIN;
-    for(int i = 0; i <= fim_fila; ++i) {
-        if(fila[i]->distancia > maior_distancia)
-            maior_distancia = fila[i]->distancia;
+    for(int i = 0; i < g->n_vertices; ++i) {
+        if(g->lista_adjacencia[i]->estado == 2 && g->lista_adjacencia[i]->distancia > maior_distancia)
+            maior_distancia = g->lista_adjacencia[i]->distancia;
     }
     free(fila);
 
     if(maior_distancia == INT_MIN)
         maior_distancia = 0;
-    return maior_distancia;
 
+    return maior_distancia;
 }
 
 int init_dijkstra(grafo *g) {
@@ -422,8 +428,8 @@ char *nome(grafo *g) {
 /*
  * Testa se existem arestas que conectam vertices no mesmo nivel (distancia de r).
  * Pelo funcionamento do busca em largura, isso nao ocorre em grafos bipartidos.
- *  O teste poderia ter sido feito ja na busca em largura, mas preferi deixar a
- *  verificacao mais explicita na funcao.
+ * O teste poderia ter sido feito ja na busca em largura, mas preferi deixar a
+ * verificacao mais explicita na funcao.
  */
 unsigned int bipartido(grafo *g) {
     init_busca_largura(g);
@@ -490,66 +496,72 @@ int compara_int(const void *a, const void *b) {
 }
 
 /*
- * Essa funcao pode ser mais eficiente, melhorar caso sobre tempo.
- * (se o professor estiver lendo isso, eh porque nao sobrou tempo)
+ * Identifica um componente  atraves de busca em largura,
+ * roda dijkstra para todos os vertices do componente,
+ * e faz o mesmo para os demais componentes
  */
 char *diametros(grafo *g) {
-    // Espaco suficiente para grafo sem nenhuma aresta
     int *diam = calloc((size_t)g->n_vertices+1, sizeof(int));
-    int atual[g->n_vertices];
+    int *visitado = calloc((size_t)g->n_vertices, sizeof(int));
     int ncomp = 0;
 
-    // MAX_INT tem 10 digitos, acho dificil passar de 5 digitos + espaco
-    char *resposta = calloc((6*(size_t)g->n_vertices), sizeof(char));
+    char *resposta = calloc(6*(size_t)g->n_vertices, sizeof(char));
 
-    int tam = g->n_vertices;
-    for(int i = 0; i < tam; ++i) {
-        for(int j = 0; j < tam; ++j) {
-            g->lista_adjacencia[j]->estado = 0;
-            g->lista_adjacencia[j]->distancia= 0;
-            g->lista_adjacencia[j]->pai = NULL;
-        }
+    for(int i = 0; i < g->n_vertices; ++i) {
+         // Caso seja um novo componente
+        if(!visitado[i]) {
+            int max_diametro = 0;
 
-       /* Roda 'dijkstra' no grafo inteiro para cada vertice do grafo.
-        * Tem a desvantagem de nao rodar somente no componente relevante
-        * daquela iteracao, desperdicando operacoes
-        */
-        int comp = 0;
-        for(int j = i; j < tam; ++j) {
-            if(!g->lista_adjacencia[j]->estado) {
-                atual[comp] = dijkstra(g, g->lista_adjacencia[j]);
-                if(atual[comp] >= diam[comp]) {
-                    diam[comp] = atual[comp];
-                    comp++;
+            for(int k = 0; k < g->n_vertices; ++k) {
+                g->lista_adjacencia[k]->estado = 0;
+                g->lista_adjacencia[k]->distancia = 0;
+                g->lista_adjacencia[k]->pai = NULL;
+            }
 
-                    if(comp > ncomp) // Guarda o numero de componentes
-                        ncomp = comp;
+            // Marca todos os vertices do componente
+            busca_largura(g, g->lista_adjacencia[i]);
+
+            for(int j = 0; j < g->n_vertices; ++j) {
+                if(g->lista_adjacencia[j]->estado == 2) {
+                    visitado[j] = 1;
+
+                    // Perde a informacao de qual vertice eh do componente
+                    for(int k = 0; k < g->n_vertices; ++k) {
+                        g->lista_adjacencia[k]->estado = 0;
+                        g->lista_adjacencia[k]->distancia = 0;
+                        g->lista_adjacencia[k]->pai = NULL;
+                    }
+
+                    // Roda dijkstra deste vertice (recupera a informacao de qual vertice eh do componente)
+                    int dist_max = dijkstra(g, g->lista_adjacencia[j]);
+                    if(dist_max > max_diametro)
+                        max_diametro = dist_max;
                 }
             }
+
+            diam[ncomp] = max_diametro;
+            ncomp++;
         }
     }
 
     if(ncomp < 0) {
-        fprintf(stderr, "'diametros' ERRO: numero de componentes negativo");
-        return NULL;
+        fprintf(stderr, "'diametros' ERRO: falha ao processar numero de componentes\n");
     }
-
-    //os exemplos estavam todos em ordem crescente
     qsort(diam, (size_t)ncomp, sizeof(int), compara_int);
 
     int fim_string = 0;
-    int add = 0;
     char *buffer = malloc(BUFFER);
     for(int i = 0; i < ncomp; ++i) {
-        add = sprintf(buffer, "%d ", diam[i]);
-        strncpy(resposta+fim_string, buffer, (size_t)add);
-        fim_string += add;
+        fim_string += sprintf(resposta + fim_string, "%d ", diam[i]);
     }
+
+    if(fim_string > 0)
+        resposta[fim_string-1] = '\0';
 
     free(buffer);
     free(diam);
+    free(visitado);
 
-    resposta[fim_string-1] = '\0';
     return resposta;
 }
 
@@ -559,8 +571,9 @@ int compara_string(const void *a, const void *b) {
 
 
 /*
- * Dada a string de entrada, ordena alfabeticamente os valores da string separados por
- * "sep", de ntokesn_item a ntokens_item
+ * Dada a string de entrada, ordena alfabeticamente
+ * os valores da string separados por
+ * "sep", de n em n onde n = ntokens_item
  */
 void ordena_tokens(char *str, int ntokens_item, const char *sep) {
     if (!str || strlen(str) == 0)
