@@ -8,6 +8,7 @@
 typedef struct aresta {
 
     int peso;
+    int retorno;
     void *vertice;
 } aresta;
 
@@ -20,7 +21,7 @@ typedef struct vertice {
     // Para BFS, DFS
     int estado;
     struct vertice *pai;
-    int nivel;
+    int distancia;
 } vertice;
 
 typedef struct grafo {
@@ -28,8 +29,10 @@ typedef struct grafo {
     char *nome;
     int n_arestas;
     int n_vertices;
+    int bipartido;
     vertice **lista_adjacencia;
 } grafo;
+
 
 vertice *cria_vertice(char *nome) {
 
@@ -46,7 +49,7 @@ vertice *cria_vertice(char *nome) {
     v->n_fronteira = 0;
     v->estado = 0;
     v->pai = 0;
-    v->nivel = 0;
+    v->distancia = 0;
 
     return v;
 }
@@ -55,7 +58,7 @@ int add_vertice(grafo *g, vertice *v) {
 
     int tam = g->n_vertices;
     if(tam && tam % 5 == 0) {
-        if(!(g->lista_adjacencia = realloc(g->lista_adjacencia, sizeof(void *)*(g->n_vertices+5)))) {
+        if(!(g->lista_adjacencia = realloc(g->lista_adjacencia, sizeof(void *)*(size_t)(g->n_vertices+5)))) {
             fprintf(stderr, "'add_vertice' ERRO: falha ao realocar lista de adjacencia");
             return 0;
         }
@@ -85,6 +88,7 @@ aresta *cria_aresta(vertice *v, int peso) {
 
     e->vertice = v;
     e->peso = peso;
+    e->retorno = 0;
 
     return e;
 }
@@ -93,7 +97,7 @@ int add_aresta(vertice *v, aresta *e) {
 
     int tam = v->n_fronteira;
     if(tam && tam % 5 == 0) {
-        if(!(v->fronteira = realloc(v->fronteira, v->n_fronteira+5))) {
+        if(!(v->fronteira = realloc(v->fronteira, sizeof(aresta*)*(size_t)(v->n_fronteira+5)))) {
             fprintf(stderr, "'add_aresta' ERRO: falha ao realocar fronteira");
             return 0;
         }
@@ -121,8 +125,7 @@ int busca_largura(grafo *g, vertice *r) {
     int tam_fila = 0;
     int com_fila = 0;
     int fim_fila = 0;
-    int nivel = 0;
-    vertice **fila = malloc(sizeof(void*)*g->n_vertices);
+    vertice **fila = malloc(sizeof(void*)*(size_t)g->n_vertices);
 
     fila[0] = r;
     tam_fila++;
@@ -132,42 +135,32 @@ int busca_largura(grafo *g, vertice *r) {
         vertice *v = fila[com_fila];
         tam_fila--;
         com_fila++;
-        if(com_fila+tam_fila < fim_fila) {
-            //fprintf(stderr, "Vai crashar aqui\n");
+        if(com_fila + tam_fila < fim_fila)
             fim_fila++;
-        }
 
-        if(v == NULL) {
-            fprintf(stderr, "Voce eh BETA\n");
-            fprintf(stderr, "tam: %d comeco: %d fim: %d\n", tam_fila, com_fila, fim_fila);
-        }
-        fprintf(stderr, "%s \n", v->nome);
-
-        int tam = v->n_fronteira;
         for(int i = 0; i < v->n_fronteira; ++i) {
+
             aresta *e = v->fronteira[i];
             vertice *w = e->vertice;
 
-            if(w->estado == 1) {
-                fprintf(stderr, " processe {%s, %s} como fora da arvore\n", v->nome, w->nome);
-
-            }
+            if(w->estado == 1) 
+                // Aqui poderia verificar se o grafo nao eh bipartido
+                // (ver 'bipartido')
+                continue;
             else if(w->estado == 0) {
 
                 w->pai = v;
-                fim_fila++;
+                w->distancia = v->distancia+1;
 
+                fim_fila++;
                 fila[fim_fila] = w;
                 tam_fila++;
-                fprintf(stderr, "Vai crashar depois daqui (%s -> %s)\n", w->pai->nome, w->nome);
+
                 w->estado = 1;
             }
         }
         v->estado = 2;
-        v->nivel = nivel;
-        nivel++;
     }
-    fprintf(stderr, "Saindo do busca_largura\n");
     free(fila);
 
     return 1;
@@ -175,8 +168,10 @@ int busca_largura(grafo *g, vertice *r) {
 
 int init_busca_largura(grafo *g) {
     int tam = g->n_vertices;
-    for(int i = 0; i < tam; ++i)
+    for(int i = 0; i < tam; ++i) {
         g->lista_adjacencia[i]->estado = 0;
+        g->lista_adjacencia[i]->distancia = 0;
+    }
 
     for(int i = 0; i < tam; ++i)
         if(!g->lista_adjacencia[i]->estado)
@@ -185,35 +180,133 @@ int init_busca_largura(grafo *g) {
     return 1;
 }
 
+int low_point(vertice *v) {
+
+    int min = v->distancia;
+    vertice *w;
+    for(int i = 0; i < v->n_fronteira; ++i) {
+        w = v->fronteira[i]->vertice;
+        if(v->fronteira[i]->retorno) {
+
+            if(w->distancia < min)
+                min = w->distancia;
+        }
+        else if(w->pai == v && w != v->pai){
+
+            int lowp = low_point(w);
+            if(lowp < min)
+                min = lowp;
+        }
+    }
+
+    return min;
+}
+
 int busca_profundidade(grafo *g, vertice *r) {
     r->estado = 1;
-    
+
     for(int i = 0; i < r->n_fronteira; ++i) {
         vertice *v = r->fronteira[i]->vertice;
         if(v->estado == 1 && v != r->pai)
-            fprintf(stderr, "Processe {r,v}\n");
+            r->fronteira[i]->retorno = 1;
         else if(v->estado == 0) {
             v->pai = r;
-            // processe {r,v}
+            v->distancia = r->distancia + 1;
             busca_profundidade(g, v);
         }
     }
-    
+
     return 0;
 }
 
 int init_busca_profundidade(grafo *g) {
     int tam = g->n_vertices;
+
+    for(int i = 0; i < tam; ++i) {
+        g->lista_adjacencia[i]->estado = 0;
+        g->lista_adjacencia[i]->distancia = 0;
+    }
+
+
+    for(int i = 0; i < tam; ++i) {
+        if(!g->lista_adjacencia[i]->estado)
+            busca_profundidade(g, g->lista_adjacencia[i]);
+    }
+
+    return 1;
+}
+
+int dijkstra(grafo *g, vertice *r) {
+
+    int tam_fila = 0;
+    int com_fila = 0;
+    int fim_fila = 0;
+    vertice **fila = malloc(sizeof(void*)*(size_t)g->n_vertices);
+
+    fila[0] = r;
+    tam_fila++;
+
+    r->estado = 1;
+    while(tam_fila) {
+
+        vertice *v = fila[com_fila];
+        tam_fila--;
+        com_fila++;
+        if(com_fila + tam_fila < fim_fila)
+            fim_fila++;
+
+        for(int i = 0; i < v->n_fronteira; ++i) {
+
+            aresta *e = v->fronteira[i];
+            vertice *w = e->vertice;
+
+            if(w->estado == 1) {
+                if(v->distancia + e->peso < w->distancia) {
+                    w->pai = v;
+                    w->distancia = v->distancia + e->peso;
+
+                }
+            }
+            else if(w->estado == 0) {
+                w->pai = v;
+                w->distancia = v->distancia+e->peso;
+
+                fim_fila++;
+                fila[fim_fila] = w;
+                tam_fila++;
+
+                w->estado = 1;
+            }
+        }
+        v->estado = 2;
+    }
+
+    int maior_distancia = INT_MIN;
+    for(int i = 0; i <= fim_fila; ++i) {
+        if(fila[i]->distancia > maior_distancia)
+            maior_distancia = fila[i]->distancia;
+    }
+    free(fila);
+
+    if(maior_distancia == INT_MIN)
+        maior_distancia = 0;
+    return maior_distancia;
+
+}
+
+int init_dijkstra(grafo *g) {
+    int tam = g->n_vertices;
+
     for(int i = 0; i < tam; ++i)
         g->lista_adjacencia[i]->estado = 0;
 
     for(int i = 0; i < tam; ++i)
         if(!g->lista_adjacencia[i]->estado)
-            busca_profundidade(g, g->lista_adjacencia[i]);
+            dijkstra(g, g->lista_adjacencia[i]);
+
 
     return 1;
 }
-
 
 grafo *le_grafo(FILE *f) {
     int flag_nome;
@@ -221,13 +314,10 @@ grafo *le_grafo(FILE *f) {
     char buffer[BUFFER];
     grafo *g;
 
-
-
     if(!(g = malloc(sizeof(grafo)))) {
         fprintf(stderr, "'le_grafo' ERRO: falha ao alocar grafo\n");
         return NULL;
     }
-
     if(!(g->nome = malloc(BUFFER))) {
         fprintf(stderr, "'le_grafo' ERRO: falha ao alocar string\n");
         return NULL;
@@ -253,23 +343,19 @@ grafo *le_grafo(FILE *f) {
 
             vertice *u, *v;
             if(!(u = busca_vertice(g, p1))) {
-                fprintf(stderr, "Criando vertice com nome \"%s\"\n", p1);
                 u = cria_vertice(p1);
-                fprintf(stderr, "Adicionando vertice com nome \"%s\"\n", u->nome);
                 add_vertice(g, u);
             }
 
             p2[strcspn(p2, "\n")] = '\0';
             if(!(v = busca_vertice(g, p2))) {
-                fprintf(stderr, "criando vertice com nome \"%s\"\n", p2);
                 v = cria_vertice(p2);
-                fprintf(stderr, "Adicionando vertice com nome \"%s\"\n", v->nome);
                 add_vertice(g, v);
             }
             if(!u || !v)
                 return NULL;
 
-            int peso = INT_MAX;
+            int peso = 1;
             if(p3 && p3[0] != ' ')
                 peso = atoi(p3);
 
@@ -329,54 +415,277 @@ unsigned int destroi_grafo(grafo *g) {
 }
 
 char *nome(grafo *g) {
+
     return g->nome;
 }
 
+/*
+ * Testa se existem arestas que conectam vertices no mesmo nivel (distancia de r).
+ * Pelo funcionamento do busca em largura, isso nao ocorre em grafos bipartidos.
+ *  O teste poderia ter sido feito ja na busca em largura, mas preferi deixar a
+ *  verificacao mais explicita na funcao.
+ */
 unsigned int bipartido(grafo *g) {
     init_busca_largura(g);
 
     int tam = g->n_vertices;
     for(int i = 0; i < tam; ++i) {
-        if(g->lista_adjacencia[i]->pai)
-            fprintf(stderr, "vertice %s filho de %s\n", g->lista_adjacencia[i]->nome, g->lista_adjacencia[i]->pai->nome);
-        else
-            fprintf(stderr, "vertice %s eh raiz\n", g->lista_adjacencia[i]->nome);
+
+        int fronteira = g->lista_adjacencia[i]->n_fronteira;
+        for(int j = 0; j < fronteira; ++j) {
+
+            vertice *u = g->lista_adjacencia[i];
+            vertice *v = g->lista_adjacencia[i]->fronteira[j]->vertice;
+
+            if(u->distancia == v->distancia)
+                return 0;
+        }
     }
-    return 0;
+
+    return 1;
 }
 
 unsigned int n_vertices(grafo *g) {
+    if(g->n_vertices < 0) {
+        fprintf(stderr, "'n_vertices' ERRO: numero de vertices menor que 0\n");
+        return 0;
+    }
 
-    return g->n_vertices;
+    return (unsigned int)g->n_vertices;
 }
 
 unsigned int n_arestas(grafo *g) {
+    if(g->n_arestas < 0) {
+        fprintf(stderr, "'n_arestas' ERRO: numero de arestas menor que 0\n");
+        return 0;
+    }
 
-    return g->n_arestas;
+    return (unsigned int)g->n_arestas;
 }
 
 
 unsigned int n_componentes(grafo *g) {
-    return 0;
+    int comp = 0;
+
+    for(int i = 0; i < g->n_vertices; ++i)
+        g->lista_adjacencia[i]->estado = 0;
+
+    for(int i = 0; i < g->n_vertices; ++i) {
+        if(!g->lista_adjacencia[i]->estado) {
+            busca_largura(g, g->lista_adjacencia[i]);
+            comp++;
+        }
+    }
+
+    if(comp < 0) {
+        fprintf(stderr, "'n_componentes' ERRO: numero de componentes menor que 0\n");
+        return 0;
+    }
+
+    return (unsigned int)comp;
 }
 
+int compara_int(const void *a, const void *b) {
+    return (*(const int*)a - *(const int*)b);
+}
+
+/*
+ * Essa funcao pode ser mais eficiente, melhorar caso sobre tempo.
+ * (se o professor estiver lendo isso, eh porque nao sobrou tempo)
+ */
 char *diametros(grafo *g) {
-    init_busca_profundidade(g);
+    // Espaco suficiente para grafo sem nenhuma aresta
+    int *diam = calloc((size_t)g->n_vertices+1, sizeof(int));
+    int atual[g->n_vertices];
+    int ncomp = 0;
+
+    // MAX_INT tem 10 digitos, acho dificil passar de 5 digitos + espaco
+    char *resposta = calloc((6*(size_t)g->n_vertices), sizeof(char));
 
     int tam = g->n_vertices;
     for(int i = 0; i < tam; ++i) {
-        if(g->lista_adjacencia[i]->pai)
-            fprintf(stderr, "vertice %s filho de %s\n", g->lista_adjacencia[i]->nome, g->lista_adjacencia[i]->pai->nome);
-        else
-            fprintf(stderr, "vertice %s eh raiz\n", g->lista_adjacencia[i]->nome);
+        for(int j = 0; j < tam; ++j) {
+            g->lista_adjacencia[j]->estado = 0;
+            g->lista_adjacencia[j]->distancia= 0;
+            g->lista_adjacencia[j]->pai = NULL;
+        }
+
+       /* Roda 'dijkstra' no grafo inteiro para cada vertice do grafo.
+        * Tem a desvantagem de nao rodar somente no componente relevante
+        * daquela iteracao, desperdicando operacoes
+        */
+        int comp = 0;
+        for(int j = i; j < tam; ++j) {
+            if(!g->lista_adjacencia[j]->estado) {
+                atual[comp] = dijkstra(g, g->lista_adjacencia[j]);
+                if(atual[comp] >= diam[comp]) {
+                    diam[comp] = atual[comp];
+                    comp++;
+
+                    if(comp > ncomp) // Guarda o numero de componentes
+                        ncomp = comp;
+                }
+            }
+        }
     }
-    return 0;
+
+    if(ncomp < 0) {
+        fprintf(stderr, "'diametros' ERRO: numero de componentes negativo");
+        return NULL;
+    }
+
+    //os exemplos estavam todos em ordem crescente
+    qsort(diam, (size_t)ncomp, sizeof(int), compara_int);
+
+    int fim_string = 0;
+    int add = 0;
+    char *buffer = malloc(BUFFER);
+    for(int i = 0; i < ncomp; ++i) {
+        add = sprintf(buffer, "%d ", diam[i]);
+        strncpy(resposta+fim_string, buffer, (size_t)add);
+        fim_string += add;
+    }
+
+    free(buffer);
+    free(diam);
+
+    resposta[fim_string-1] = '\0';
+    return resposta;
+}
+
+int compara_string(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+
+/*
+ * Dada a string de entrada, ordena alfabeticamente os valores da string separados por
+ * "sep", de ntokesn_item a ntokens_item
+ */
+void ordena_tokens(char *str, int ntokens_item, const char *sep) {
+    if (!str || strlen(str) == 0)
+        return;
+    if(ntokens_item > 1000) {
+        fprintf(stderr, "'ordena_tokens' ERRO: muitos tokens por ordenacao");
+        return;
+    }
+
+    char **items = malloc(BUFFER);
+    int count = 0;
+
+    char *token = strtok(str, sep);
+    while (token && count < BUFFER) {
+        char *tokens_temp[ntokens_item];
+        size_t tamanho_item = 0;
+        int coletados = 0;
+
+        for (int i = 0; i < ntokens_item && token; i++) {
+            tokens_temp[i] = token;
+            tamanho_item += strlen(token) + 1;
+            coletados++;
+            token = strtok(NULL, sep);
+        }
+
+        if (coletados == ntokens_item) {
+            items[count] = malloc((size_t)tamanho_item + 1);
+            int pos = 0;
+            for (int i = 0; i < ntokens_item; i++) {
+                pos += sprintf(items[count] + pos, "%s", tokens_temp[i]);
+                if (i < ntokens_item - 1)
+                    pos += sprintf(items[count] + pos, sep);
+            }
+            count++;
+        }
+    }
+
+    if (count == 0)
+        return;
+
+    if(count < 0) {
+        fprintf(stderr, "'ordena_tokens' ERRO: falha ao obter numero de tokens");
+        return;
+    }
+
+    qsort(items, (size_t)count, sizeof(char*), compara_string);
+
+    char *temp = malloc(strlen(str) + (size_t)count * 10);
+    int pos = 0;
+    for (int i = 0; i < count; i++) {
+        pos += sprintf(temp + pos, "%s ", items[i]);
+        free(items[i]);
+    }
+
+    strcpy(str, temp);
+    free(temp);
+    free(items);
+
+    if (pos > 0)
+        str[pos - 1] = '\0';
 }
 
 char *vertices_corte(grafo *g) {
-    return 0;
+    init_busca_profundidade(g);
+    char *resposta = calloc(BUFFER, sizeof(char));
+    int fim_string, add;
+
+    int n = g->n_vertices;
+    vertice *v, *w;
+    fim_string = add = 0;
+    for(int i = 0; i < n; ++i) {
+        v = g->lista_adjacencia[i];
+
+        if(v->distancia == 0) {
+            int children_count = 0;
+            for(int j = 0; j < v->n_fronteira; ++j) {
+                w = v->fronteira[j]->vertice;
+                if(w->pai == v)
+                    children_count++;
+            }
+
+            if(children_count > 1)
+                    fim_string += sprintf(resposta+fim_string, "%s ", v->nome);
+        }
+        else {
+            int nfronteira = v->n_fronteira;
+            int nivel = v->distancia;
+            for(int j = 0; j < nfronteira; ++j) {
+                w = v->fronteira[j]->vertice;
+                if(w->pai == v && nivel <= low_point(w)) {
+                    fim_string += sprintf(resposta+fim_string, "%s ", v->nome);
+                }
+            }
+        }
+    }
+
+    ordena_tokens(resposta, 1, " ");
+    return resposta;
 }
 
 char *arestas_corte(grafo *g) {
-    return NULL;
+    init_busca_profundidade(g);
+    char *resposta = calloc((size_t)g->n_arestas*BUFFER, sizeof(char));
+    char buffer[BUFFER];
+    int fim_string, add;
+
+    int n = g->n_vertices;
+    vertice *u, *v;
+    fim_string = add = 0;
+    for(int i = 0; i < n; ++i) {
+        u = g->lista_adjacencia[i];
+        int nfronteira = u->n_fronteira;
+
+        for(int j = 0; j < nfronteira; ++j) {
+            v = u->fronteira[j]->vertice;
+            if(u == v->pai) {
+                if(u->distancia < low_point(v)) {
+                    sprintf(buffer, "%s %s ", u->nome, v->nome);
+                    ordena_tokens(buffer, 1, " ");
+                    fim_string += sprintf(resposta+fim_string, "%s ", buffer);
+                }
+            }
+        }
+    }
+
+    ordena_tokens(resposta, 2, " ");
+    return resposta;
 }
